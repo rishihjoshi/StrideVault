@@ -27,6 +27,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupForms();
   setupExportImport();
   setupHistoryTabs();
+  setupHistoryDelegation(); // SEC: event delegation replaces inline onclick
 
   renderDashboard();
   showLoading(false);
@@ -36,7 +37,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       .catch(err => console.warn('SW:', err));
   }
 
-  // Install prompt – store for later use
   window.addEventListener('beforeinstallprompt', (e) => {
     e.preventDefault();
     window._installPrompt = e;
@@ -70,11 +70,14 @@ function setupNav() {
 }
 
 function navigateTo(tab) {
+  // Whitelist allowed tabs to prevent DOM clobbering via data-tab manipulation
+  const ALLOWED_TABS = ['dashboard', 'history', 'charts', 'settings'];
+  if (!ALLOWED_TABS.includes(tab)) return;
+
   state.currentTab = tab;
 
   document.querySelectorAll('.nav-item').forEach(el =>
     el.classList.toggle('active', el.dataset.tab === tab));
-
   document.querySelectorAll('.tab-content').forEach(el =>
     el.classList.toggle('active', el.id === `tab-${tab}`));
 
@@ -135,12 +138,13 @@ function openWorkoutModal(workout = null) {
   title.textContent = workout ? 'Edit Workout' : 'Log Workout';
 
   if (workout) {
-    form.date.value     = workout.date;
-    form.type.value     = workout.type;
-    form.distance.value = workout.distance;
-    form.time.value     = workout.time;
-    form.incline.value  = workout.incline ?? '';
-    form.notes.value    = workout.notes ?? '';
+    // SEC: set via .value (DOM property), never via innerHTML
+    form.date.value     = sanitizeDateStr(workout.date);
+    form.type.value     = ALLOWED_TYPES.includes(workout.type) ? workout.type : 'walking';
+    form.distance.value = toFinitePositive(workout.distance);
+    form.time.value     = toFinitePositive(workout.time);
+    form.incline.value  = workout.incline != null ? toFinite(workout.incline) : '';
+    form.notes.value    = String(workout.notes ?? '').slice(0, 500);
   } else {
     form.reset();
     form.date.value = todayISO();
@@ -158,8 +162,8 @@ function openWeightModal(log = null) {
   title.textContent = log ? 'Edit Weight' : 'Log Weight';
 
   if (log) {
-    form.date.value     = log.date;
-    form.weightKg.value = log.weightKg;
+    form.date.value     = sanitizeDateStr(log.date);
+    form.weightKg.value = toFinitePositive(log.weightKg);
   } else {
     form.reset();
     form.date.value = todayISO();
@@ -170,8 +174,8 @@ function openWeightModal(log = null) {
 
 function openGoalsModal() {
   const form = document.getElementById('goals-form');
-  form.dailyDistance.value = state.goals.dailyDistance;
-  form.dailyTime.value     = state.goals.dailyTime;
+  form.dailyDistance.value = toFinitePositive(state.goals.dailyDistance);
+  form.dailyTime.value     = toFinitePositive(state.goals.dailyTime);
   document.getElementById('goals-modal').classList.add('open');
 }
 
@@ -200,23 +204,43 @@ function setupForms() {
 
 function updateSpeedPreview() {
   const form = document.getElementById('workout-form');
-  const d    = parseFloat(form.distance.value) || 0;
-  const t    = parseFloat(form.time.value) || 0;
+  const d    = parseFloat(form.distance.value);
+  const t    = parseFloat(form.time.value);
   const el   = document.getElementById('speed-preview');
-  el.textContent = (d > 0 && t > 0) ? `Auto speed: ${((d / t) * 60).toFixed(2)} km/h` : '';
+  // SEC: use .textContent, never innerHTML; guard division-by-zero
+  el.textContent = (isFinite(d) && d > 0 && isFinite(t) && t > 0)
+    ? `Auto speed: ${calcSpeed(d, t)} km/h`
+    : '';
 }
 
 async function saveWorkout(form) {
   const d = parseFloat(form.distance.value);
   const t = parseFloat(form.time.value);
+
+  // SEC: validate numeric inputs — reject NaN / Infinity / non-positive
+  if (!isFinite(d) || d <= 0 || !isFinite(t) || t <= 0) {
+    showToast('Distance and time must be positive numbers', true);
+    return;
+  }
+
+  // SEC: validate date format strictly
+  const date = form.date.value;
+  if (!isValidDate(date)) { showToast('Invalid date', true); return; }
+
+  // SEC: whitelist workout type
+  const type = ALLOWED_TYPES.includes(form.type.value) ? form.type.value : 'walking';
+
+  const inclineRaw = parseFloat(form.incline.value);
+  const notesRaw   = form.notes.value.trim();
+
   const workout = {
-    date:     form.date.value,
-    type:     form.type.value,
+    date,
+    type,
     distance: d,
     time:     t,
-    speed:    parseFloat(((d / t) * 60).toFixed(2)),
-    ...(form.incline.value ? { incline: parseFloat(form.incline.value) } : {}),
-    ...(form.notes.value   ? { notes: form.notes.value.trim() } : {}),
+    speed:    calcSpeed(d, t),
+    ...(isFinite(inclineRaw) && inclineRaw >= 0 ? { incline: inclineRaw } : {}),
+    ...(notesRaw ? { notes: notesRaw.slice(0, 500) } : {}),
   };
 
   if (state.editingWorkout) {
@@ -234,7 +258,13 @@ async function saveWorkout(form) {
 }
 
 async function saveWeight(form) {
-  const log = { date: form.date.value, weightKg: parseFloat(form.weightKg.value) };
+  const kg   = parseFloat(form.weightKg.value);
+  const date = form.date.value;
+
+  if (!isValidDate(date)) { showToast('Invalid date', true); return; }
+  if (!isFinite(kg) || kg <= 0) { showToast('Weight must be a positive number', true); return; }
+
+  const log = { date, weightKg: kg };
 
   if (state.editingWeight) {
     await updateWeightLog(state.editingWeight.id, log);
@@ -251,11 +281,13 @@ async function saveWeight(form) {
 }
 
 async function saveGoals(form) {
-  const goals = {
-    id:            'daily',
-    dailyDistance: parseFloat(form.dailyDistance.value),
-    dailyTime:     parseFloat(form.dailyTime.value),
-  };
+  const dist = parseFloat(form.dailyDistance.value);
+  const time = parseFloat(form.dailyTime.value);
+
+  if (!isFinite(dist) || dist < 0) { showToast('Invalid distance goal', true); return; }
+  if (!isFinite(time) || time < 0) { showToast('Invalid time goal', true); return; }
+
+  const goals = { id: 'daily', dailyDistance: dist, dailyTime: time };
   await updateGoals(goals);
   state.goals = goals;
   closeAllModals();
@@ -268,43 +300,42 @@ async function saveGoals(form) {
 // DASHBOARD
 // ─────────────────────────────────────────────────────────────────────────────
 function renderDashboard() {
-  const today         = todayISO();
-  const todayW        = state.workouts.filter(w => w.date === today);
-  const todayDist     = todayW.reduce((s, w) => s + w.distance, 0);
-  const todayTime     = todayW.reduce((s, w) => s + w.time, 0);
-  const latestWeight  = state.weightLogs[0];
+  const today        = todayISO();
+  const todayW       = state.workouts.filter(w => w.date === today);
+  const todayDist    = todayW.reduce((s, w) => s + (Number(w.distance) || 0), 0);
+  const todayTime    = todayW.reduce((s, w) => s + (Number(w.time) || 0), 0);
+  const latestWeight = state.weightLogs[0];
 
+  // SEC: all written via .textContent through setText(), never innerHTML
   setText('stat-distance', todayDist.toFixed(2));
   setText('stat-time', todayTime);
-  setText('stat-weight', latestWeight ? `${latestWeight.weightKg} kg` : '—');
+  setText('stat-weight', latestWeight ? `${Number(latestWeight.weightKg).toFixed(1)} kg` : '—');
   setText('stat-workouts', todayW.length);
 
-  // Progress bars
-  const distPct = Math.min((todayDist / state.goals.dailyDistance) * 100, 100);
-  const timePct = Math.min((todayTime  / state.goals.dailyTime)    * 100, 100);
+  const goalDist = Number(state.goals.dailyDistance) || 1;
+  const goalTime = Number(state.goals.dailyTime) || 1;
+  const distPct  = Math.min((todayDist / goalDist) * 100, 100);
+  const timePct  = Math.min((todayTime  / goalTime) * 100, 100);
 
   setStyle('progress-distance', 'width', `${distPct}%`);
   setStyle('progress-time',     'width', `${timePct}%`);
-  setText('goal-distance-text', `${todayDist.toFixed(1)} / ${state.goals.dailyDistance} km`);
-  setText('goal-time-text',     `${todayTime} / ${state.goals.dailyTime} min`);
+  setText('goal-distance-text', `${todayDist.toFixed(1)} / ${goalDist} km`);
+  setText('goal-time-text',     `${todayTime} / ${goalTime} min`);
 
-  // Weight delta
   const wDelta = document.getElementById('weight-delta');
   if (state.weightLogs.length >= 2) {
-    const diff = (state.weightLogs[0].weightKg - state.weightLogs[1].weightKg).toFixed(1);
-    const sign = diff > 0 ? '+' : '';
-    wDelta.textContent = `${sign}${diff} kg vs prev`;
-    wDelta.className = `weight-delta ${diff <= 0 ? 'down' : 'up'}`;
-  } else {
-    wDelta.textContent = '';
-  }
+    const a    = Number(state.weightLogs[0].weightKg);
+    const b    = Number(state.weightLogs[1].weightKg);
+    const diff = isFinite(a) && isFinite(b) ? (a - b).toFixed(1) : null;
+    if (diff !== null) {
+      wDelta.textContent = `${diff > 0 ? '+' : ''}${diff} kg vs prev`;
+      wDelta.className   = `weight-delta ${diff <= 0 ? 'down' : 'up'}`;
+    } else { wDelta.textContent = ''; }
+  } else { wDelta.textContent = ''; }
 
-  // Streak
   const streak = calcStreak();
   setText('streak-count', streak);
-  setText('streak-label', streak === 1 ? 'day streak' : 'day streak');
 
-  // Greeting
   const h = new Date().getHours();
   const greeting = h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
   setText('greeting', greeting);
@@ -317,17 +348,24 @@ function renderRecentWorkouts() {
   const recent    = state.workouts.slice(0, 5);
 
   if (!recent.length) {
-    container.innerHTML = `<p class="empty-state">No workouts yet — tap <strong>+</strong> to add one!</p>`;
+    // SEC: static string — no user data — safe to use innerHTML
+    container.innerHTML = '<p class="empty-state">No workouts yet — tap <strong>+</strong> to add one!</p>';
     return;
   }
 
-  container.innerHTML = recent.map(w => `
-    <div class="workout-row">
-      <span class="badge ${w.type}">${w.type}</span>
-      <span class="workout-row-date">${fmtDate(w.date)}</span>
-      <span class="workout-row-stats">${w.distance} km · ${w.time} min · ${w.speed} km/h</span>
-    </div>
-  `).join('');
+  // SEC: all user data sanitized before interpolation into innerHTML
+  container.innerHTML = recent.map(w => {
+    const safeType = ALLOWED_TYPES.includes(w.type) ? w.type : 'walking';
+    const dist     = safeNum(w.distance, 2);
+    const time     = safeNum(w.time, 0);
+    const speed    = safeNum(w.speed, 2);
+    return `
+      <div class="workout-row">
+        <span class="badge ${safeType}">${escHtml(safeType)}</span>
+        <span class="workout-row-date">${escHtml(fmtDate(sanitizeDateStr(w.date)))}</span>
+        <span class="workout-row-stats">${dist} km · ${time} min · ${speed} km/h</span>
+      </div>`;
+  }).join('');
 }
 
 function calcStreak() {
@@ -337,6 +375,7 @@ function calcStreak() {
   const cur = new Date();
   cur.setHours(12, 0, 0, 0);
   for (const d of dates) {
+    if (!isValidDate(d)) continue;
     const diff = Math.round((cur - new Date(d + 'T12:00:00')) / 86400000);
     if (diff === streak) streak++;
     else break;
@@ -350,6 +389,27 @@ function calcStreak() {
 function setupHistoryTabs() {
   document.querySelectorAll('.htab-btn').forEach(btn => {
     btn.addEventListener('click', () => switchHistoryTab(btn.dataset.htab));
+  });
+}
+
+// SEC: delegate all edit/delete actions — no inline onclick with user-controlled IDs
+function setupHistoryDelegation() {
+  document.getElementById('workout-history').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-action]');
+    if (!btn) return;
+    const id = btn.dataset.id;
+    if (typeof id !== 'string' || !id) return;
+    if (btn.dataset.action === 'edit-workout')   editWorkout(id);
+    if (btn.dataset.action === 'delete-workout') confirmDeleteWorkout(id);
+  });
+
+  document.getElementById('weight-history').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-action]');
+    if (!btn) return;
+    const id = btn.dataset.id;
+    if (typeof id !== 'string' || !id) return;
+    if (btn.dataset.action === 'edit-weight')   editWeight(id);
+    if (btn.dataset.action === 'delete-weight') confirmDeleteWeight(id);
   });
 }
 
@@ -371,33 +431,47 @@ function renderWorkoutHistory() {
     el.innerHTML = '<p class="empty-state">No workouts logged yet.</p>';
     return;
   }
-  el.innerHTML = state.workouts.map(w => `
-    <div class="history-item">
-      <div class="hi-main">
-        <div class="hi-top">
-          <span class="badge ${w.type}">${w.type}</span>
-          <span class="hi-date">${fmtDate(w.date)}</span>
+
+  el.innerHTML = state.workouts.map(w => {
+    // SEC: sanitize every field before interpolation
+    const safeType = ALLOWED_TYPES.includes(w.type) ? w.type : 'walking';
+    const safeId   = escAttr(String(w.id ?? ''));        // for data-id attribute
+    const dateStr  = escHtml(fmtDate(sanitizeDateStr(w.date)));
+    const dist     = safeNum(w.distance, 2);
+    const time     = safeNum(w.time, 0);
+    const speed    = safeNum(w.speed, 2);
+    const incl     = w.incline != null ? safeNum(w.incline, 1) : null;
+    const notes    = w.notes ? escHtml(String(w.notes).slice(0, 500)) : null;
+
+    return `
+      <div class="history-item">
+        <div class="hi-main">
+          <div class="hi-top">
+            <span class="badge ${safeType}">${escHtml(safeType)}</span>
+            <span class="hi-date">${dateStr}</span>
+          </div>
+          <div class="hi-stats">
+            <span>${dist} km</span>
+            <span class="hi-sep">·</span>
+            <span>${time} min</span>
+            <span class="hi-sep">·</span>
+            <span>${speed} km/h</span>
+            ${incl !== null ? `<span class="hi-sep">·</span><span>${incl}% incline</span>` : ''}
+          </div>
+          ${notes ? `<p class="hi-notes">${notes}</p>` : ''}
         </div>
-        <div class="hi-stats">
-          <span>${w.distance} km</span>
-          <span class="hi-sep">·</span>
-          <span>${w.time} min</span>
-          <span class="hi-sep">·</span>
-          <span>${w.speed} km/h</span>
-          ${w.incline ? `<span class="hi-sep">·</span><span>${w.incline}% incline</span>` : ''}
+        <div class="hi-actions">
+          <button class="icon-btn" aria-label="Edit"
+            data-action="edit-workout" data-id="${safeId}">
+            <svg viewBox="0 0 20 20" fill="currentColor"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z"/></svg>
+          </button>
+          <button class="icon-btn danger" aria-label="Delete"
+            data-action="delete-workout" data-id="${safeId}">
+            <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
+          </button>
         </div>
-        ${w.notes ? `<p class="hi-notes">${escHtml(w.notes)}</p>` : ''}
-      </div>
-      <div class="hi-actions">
-        <button class="icon-btn" aria-label="Edit" onclick="editWorkout('${w.id}')">
-          <svg viewBox="0 0 20 20" fill="currentColor"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z"/></svg>
-        </button>
-        <button class="icon-btn danger" aria-label="Delete" onclick="confirmDeleteWorkout('${w.id}')">
-          <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
-        </button>
-      </div>
-    </div>
-  `).join('');
+      </div>`;
+  }).join('');
 }
 
 function renderWeightHistory() {
@@ -406,40 +480,50 @@ function renderWeightHistory() {
     el.innerHTML = '<p class="empty-state">No weight logs yet.</p>';
     return;
   }
+
   el.innerHTML = state.weightLogs.map((l, i) => {
-    const prev = state.weightLogs[i + 1];
-    const delta = prev ? (l.weightKg - prev.weightKg).toFixed(1) : null;
+    // SEC: sanitize all fields
+    const safeId  = escAttr(String(l.id ?? ''));
+    const dateStr = escHtml(fmtDate(sanitizeDateStr(l.date)));
+    const kg      = safeNum(l.weightKg, 1);
+
+    const prev  = state.weightLogs[i + 1];
+    const delta = prev && isFinite(Number(prev.weightKg))
+      ? (Number(l.weightKg) - Number(prev.weightKg)).toFixed(1)
+      : null;
     const deltaHtml = delta !== null
       ? `<span class="weight-delta ${delta <= 0 ? 'down' : 'up'}">${delta > 0 ? '+' : ''}${delta}</span>`
       : '';
+
     return `
       <div class="history-item">
         <div class="hi-main">
           <div class="hi-top">
-            <span class="hi-weight">${l.weightKg} <small>kg</small> ${deltaHtml}</span>
-            <span class="hi-date">${fmtDate(l.date)}</span>
+            <span class="hi-weight">${kg} <small>kg</small> ${deltaHtml}</span>
+            <span class="hi-date">${dateStr}</span>
           </div>
         </div>
         <div class="hi-actions">
-          <button class="icon-btn" aria-label="Edit" onclick="editWeight('${l.id}')">
+          <button class="icon-btn" aria-label="Edit"
+            data-action="edit-weight" data-id="${safeId}">
             <svg viewBox="0 0 20 20" fill="currentColor"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z"/></svg>
           </button>
-          <button class="icon-btn danger" aria-label="Delete" onclick="confirmDeleteWeight('${l.id}')">
+          <button class="icon-btn danger" aria-label="Delete"
+            data-action="delete-weight" data-id="${safeId}">
             <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
           </button>
         </div>
-      </div>
-    `;
+      </div>`;
   }).join('');
 }
 
 function editWorkout(id) {
-  const w = state.workouts.find(w => w.id === id);
+  const w = state.workouts.find(w => String(w.id) === String(id));
   if (w) openWorkoutModal(w);
 }
 
 function editWeight(id) {
-  const l = state.weightLogs.find(l => l.id === id);
+  const l = state.weightLogs.find(l => String(l.id) === String(id));
   if (l) openWeightModal(l);
 }
 
@@ -482,13 +566,13 @@ const CHART_DEFAULTS = {
   },
   scales: {
     x: {
-      grid:  { color: 'rgba(255,255,255,0.04)' },
-      ticks: { color: '#71717A', font: { size: 11 }, maxRotation: 45 },
+      grid:   { color: 'rgba(255,255,255,0.04)' },
+      ticks:  { color: '#71717A', font: { size: 11 }, maxRotation: 45 },
       border: { color: 'transparent' },
     },
     y: {
-      grid:  { color: 'rgba(255,255,255,0.04)' },
-      ticks: { color: '#71717A', font: { size: 11 } },
+      grid:   { color: 'rgba(255,255,255,0.04)' },
+      ticks:  { color: '#71717A', font: { size: 11 } },
       border: { color: 'transparent' },
     },
   },
@@ -515,18 +599,18 @@ function renderDistanceChart() {
   state.charts.distance = new Chart(ctx, {
     type: 'line',
     data: {
-      labels: data.map(w => fmtShort(w.date)),
+      labels:   data.map(w => escHtml(fmtShort(sanitizeDateStr(w.date)))),
       datasets: [{
-        data: data.map(w => w.distance),
-        borderColor: '#A3E635',
-        backgroundColor: 'rgba(163,230,53,0.08)',
-        fill: true,
-        tension: 0.4,
-        pointBackgroundColor: '#A3E635',
-        pointBorderColor: '#0B0B0B',
-        pointBorderWidth: 2,
-        pointRadius: 4,
-        pointHoverRadius: 6,
+        data:                data.map(w => Number(w.distance) || 0),
+        borderColor:         '#A3E635',
+        backgroundColor:     'rgba(163,230,53,0.08)',
+        fill:                true,
+        tension:             0.4,
+        pointBackgroundColor:'#A3E635',
+        pointBorderColor:    '#0B0B0B',
+        pointBorderWidth:    2,
+        pointRadius:         4,
+        pointHoverRadius:    6,
       }],
     },
     options: { ...CHART_DEFAULTS },
@@ -544,18 +628,18 @@ function renderWeightChart() {
   state.charts.weight = new Chart(ctx, {
     type: 'line',
     data: {
-      labels: data.map(l => fmtShort(l.date)),
+      labels:   data.map(l => escHtml(fmtShort(sanitizeDateStr(l.date)))),
       datasets: [{
-        data: data.map(l => l.weightKg),
-        borderColor: '#60A5FA',
-        backgroundColor: 'rgba(96,165,250,0.08)',
-        fill: true,
-        tension: 0.4,
-        pointBackgroundColor: '#60A5FA',
-        pointBorderColor: '#0B0B0B',
-        pointBorderWidth: 2,
-        pointRadius: 4,
-        pointHoverRadius: 6,
+        data:                data.map(l => Number(l.weightKg) || 0),
+        borderColor:         '#60A5FA',
+        backgroundColor:     'rgba(96,165,250,0.08)',
+        fill:                true,
+        tension:             0.4,
+        pointBackgroundColor:'#60A5FA',
+        pointBorderColor:    '#0B0B0B',
+        pointBorderWidth:    2,
+        pointRadius:         4,
+        pointHoverRadius:    6,
       }],
     },
     options: { ...CHART_DEFAULTS },
@@ -573,24 +657,24 @@ function renderWeeklyChart() {
   state.charts.weekly = new Chart(ctx, {
     type: 'bar',
     data: {
-      labels: weeks.map(w => w.label),
+      labels:   weeks.map(w => w.label),
       datasets: [
         {
-          label: 'Distance (km)',
-          data: weeks.map(w => w.distance),
+          label:           'Distance (km)',
+          data:            weeks.map(w => w.distance),
           backgroundColor: 'rgba(163,230,53,0.7)',
-          borderColor: '#A3E635',
-          borderRadius: 6,
-          borderSkipped: false,
+          borderColor:     '#A3E635',
+          borderRadius:    6,
+          borderSkipped:   false,
         },
         {
-          label: 'Workouts',
-          data: weeks.map(w => w.count),
+          label:           'Workouts',
+          data:            weeks.map(w => w.count),
           backgroundColor: 'rgba(96,165,250,0.5)',
-          borderColor: '#60A5FA',
-          borderRadius: 6,
-          borderSkipped: false,
-          yAxisID: 'y2',
+          borderColor:     '#60A5FA',
+          borderRadius:    6,
+          borderSkipped:   false,
+          yAxisID:         'y2',
         },
       ],
     },
@@ -605,7 +689,6 @@ function renderWeeklyChart() {
       },
       scales: {
         ...CHART_DEFAULTS.scales,
-        y:  { ...CHART_DEFAULTS.scales.y, title: { display: false } },
         y2: {
           position: 'right',
           grid: { drawOnChartArea: false },
@@ -622,13 +705,14 @@ function getWeeklyData() {
   const weekMap = new Map();
 
   state.workouts.forEach(w => {
+    if (!isValidDate(w.date)) return;
     const d = new Date(w.date + 'T12:00:00');
-    d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); // Monday
+    d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); // → Monday
     const key   = d.toISOString().split('T')[0];
     const label = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
     if (!weekMap.has(key)) weekMap.set(key, { key, label, distance: 0, count: 0 });
     const e = weekMap.get(key);
-    e.distance += w.distance;
+    e.distance += Number(w.distance) || 0;
     e.count++;
   });
 
@@ -651,7 +735,7 @@ function renderSettings() {
   setText('settings-weight-count',  state.weightLogs.length);
 
   const first = [...state.workouts].sort((a, b) => a.date.localeCompare(b.date))[0];
-  setText('settings-since', first ? fmtDate(first.date) : '—');
+  setText('settings-since', first ? fmtDate(sanitizeDateStr(first.date)) : '—');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -669,10 +753,12 @@ async function doExport() {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const url  = URL.createObjectURL(blob);
   const a    = Object.assign(document.createElement('a'), {
-    href: url,
+    href:     url,
     download: `stridevault-backup-${todayISO()}.json`,
   });
+  document.body.appendChild(a);
   a.click();
+  document.body.removeChild(a);
   URL.revokeObjectURL(url);
   showToast('Backup downloaded!');
 }
@@ -680,23 +766,169 @@ async function doExport() {
 async function doImport(e) {
   const file = e.target.files[0];
   if (!file) return;
+
+  // SEC: reject files larger than 5 MB
+  const MAX_SIZE = 5 * 1024 * 1024;
+  if (file.size > MAX_SIZE) {
+    showToast('File too large (max 5 MB)', true);
+    e.target.value = '';
+    return;
+  }
+
+  // SEC: only accept .json files
+  if (!file.name.toLowerCase().endsWith('.json') && file.type !== 'application/json') {
+    showToast('Only .json files are accepted', true);
+    e.target.value = '';
+    return;
+  }
+
   try {
-    const data = JSON.parse(await file.text());
-    await importAllData(data);
+    const raw  = await file.text();
+    const data = JSON.parse(raw);               // may throw SyntaxError
+    const safe = validateAndSanitizeImport(data); // throws on bad schema
+
+    await importAllData(safe);
     await loadAll();
     renderDashboard();
     if (state.currentTab === 'history') renderHistory();
     if (state.currentTab === 'settings') renderSettings();
-    showToast(`Imported ${data.workouts.length} workouts, ${data.weightLogs.length} weight logs`);
-  } catch {
-    showToast('Import failed — invalid file', true);
+    showToast(`Imported ${safe.workouts.length} workouts, ${safe.weightLogs.length} weight logs`);
+  } catch (err) {
+    showToast(`Import failed: ${err.message || 'invalid file'}`, true);
   }
   e.target.value = '';
 }
 
+// SEC: full sanitization of imported JSON — prevents XSS via stored data,
+// prototype pollution, and out-of-range values from reaching the UI.
+function validateAndSanitizeImport(data) {
+  // Guard against null, arrays, and primitive values
+  if (!data || typeof data !== 'object' || Array.isArray(data))
+    throw new Error('Expected a JSON object');
+
+  if (!Array.isArray(data.workouts) || !Array.isArray(data.weightLogs))
+    throw new Error('Missing workouts or weightLogs arrays');
+
+  // Hard size cap to prevent memory exhaustion
+  if (data.workouts.length > 10_000 || data.weightLogs.length > 10_000)
+    throw new Error('Data too large (max 10 000 entries per type)');
+
+  // Reconstruct each entry from scratch — prevents prototype-pollution payloads
+  // and ensures only the fields we expect are stored.
+  const workouts = data.workouts
+    .filter(w => w && typeof w === 'object' && !Array.isArray(w))
+    .map(w => {
+      const id       = String(w.id ?? '').slice(0, 64).replace(/[^\w\-]/g, '');
+      const date     = sanitizeDateStr(String(w.date ?? ''));
+      const type     = ALLOWED_TYPES.includes(w.type) ? w.type : 'walking';
+      const distance = clampNum(w.distance, 0.01, 9999, 2);
+      const time     = clampNum(w.time,     0.1,  9999, 1);
+      const speed    = isFinite(Number(w.speed)) ? clampNum(w.speed, 0, 999, 2) : calcSpeed(distance, time);
+      const entry    = { id: id || undefined, date, type, distance, time, speed };
+
+      if (w.incline != null) {
+        const inc = clampNum(w.incline, 0, 30, 1);
+        if (inc >= 0) entry.incline = inc;
+      }
+      if (w.notes) {
+        entry.notes = String(w.notes).slice(0, 500);
+      }
+      return entry;
+    })
+    .filter(w => w.date && w.distance > 0 && w.time > 0);
+
+  const weightLogs = data.weightLogs
+    .filter(l => l && typeof l === 'object' && !Array.isArray(l))
+    .map(l => {
+      const id  = String(l.id ?? '').slice(0, 64).replace(/[^\w\-]/g, '');
+      const date = sanitizeDateStr(String(l.date ?? ''));
+      const kg   = clampNum(l.weightKg, 1, 999, 1);
+      return { id: id || undefined, date, weightKg: kg };
+    })
+    .filter(l => l.date && l.weightKg > 0);
+
+  let goals = { id: 'daily', dailyDistance: 5, dailyTime: 45 };
+  if (data.goals && typeof data.goals === 'object' && !Array.isArray(data.goals)) {
+    goals = {
+      id:            'daily',
+      dailyDistance: clampNum(data.goals.dailyDistance, 0, 999, 1),
+      dailyTime:     clampNum(data.goals.dailyTime,     0, 999, 0),
+    };
+  }
+
+  return { workouts, weightLogs, goals };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
-// UTILS
+// UTILS — safe HTML escaping, numeric helpers, date validation
 // ─────────────────────────────────────────────────────────────────────────────
+
+// Allowed workout types — whitelist enforced everywhere
+const ALLOWED_TYPES = ['walking', 'running'];
+
+// SEC: escape for HTML text content context
+function escHtml(s) {
+  return String(s)
+    .replace(/&/g,  '&amp;')
+    .replace(/</g,  '&lt;')
+    .replace(/>/g,  '&gt;')
+    .replace(/"/g,  '&quot;')
+    .replace(/'/g,  '&#x27;');
+}
+
+// SEC: escape for HTML attribute value context (e.g. data-id="...")
+function escAttr(s) {
+  return String(s)
+    .replace(/&/g,  '&amp;')
+    .replace(/"/g,  '&quot;')
+    .replace(/'/g,  '&#x27;')
+    .replace(/</g,  '&lt;')
+    .replace(/>/g,  '&gt;');
+}
+
+// Clamp a value to a numeric range and round to given decimals
+function clampNum(val, min, max, decimals = 2) {
+  const n = Number(val);
+  if (!isFinite(n)) return min;
+  return parseFloat(Math.min(max, Math.max(min, n)).toFixed(decimals));
+}
+
+// Format a number safely for display (no NaN/Infinity in output)
+function safeNum(val, decimals = 2) {
+  const n = Number(val);
+  return isFinite(n) ? n.toFixed(decimals) : '0';
+}
+
+// Ensure value is a finite positive number (for form pre-fill)
+function toFinitePositive(val) {
+  const n = Number(val);
+  return isFinite(n) && n > 0 ? n : '';
+}
+
+function toFinite(val) {
+  const n = Number(val);
+  return isFinite(n) ? n : '';
+}
+
+// Speed: km/h, guards division-by-zero
+function calcSpeed(distKm, timeMin) {
+  if (!isFinite(distKm) || !isFinite(timeMin) || timeMin <= 0) return 0;
+  return parseFloat(((distKm / timeMin) * 60).toFixed(2));
+}
+
+// Validate ISO date string (YYYY-MM-DD)
+const DATE_RE = /^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])$/;
+function isValidDate(s) {
+  if (typeof s !== 'string' || !DATE_RE.test(s)) return false;
+  const d = new Date(s + 'T12:00:00');
+  return !isNaN(d.getTime());
+}
+
+// Return the input if it's a valid date, otherwise today
+function sanitizeDateStr(s) {
+  return isValidDate(s) ? s : todayISO();
+}
+
 function todayISO() { return new Date().toISOString().split('T')[0]; }
 
 function fmtDate(s) {
@@ -711,16 +943,12 @@ function fmtShort(s) {
 
 function setText(id, val) {
   const el = document.getElementById(id);
-  if (el) el.textContent = val;
+  if (el) el.textContent = val;   // SEC: always textContent, never innerHTML
 }
 
 function setStyle(id, prop, val) {
   const el = document.getElementById(id);
   if (el) el.style[prop] = val;
-}
-
-function escHtml(s) {
-  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 function showLoading(show) {
@@ -731,7 +959,7 @@ let toastTimer;
 function showToast(msg, isError = false) {
   const el = document.getElementById('toast');
   clearTimeout(toastTimer);
-  el.textContent = msg;
+  el.textContent = String(msg).slice(0, 200); // SEC: textContent + length cap
   el.className   = `toast ${isError ? 'error' : ''} show`;
-  toastTimer = setTimeout(() => el.classList.remove('show'), 3000);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 3500);
 }

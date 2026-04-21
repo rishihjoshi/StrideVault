@@ -24,11 +24,23 @@
   --radius-full:  9999px;
   --shadow:       0 4px 24px rgba(0,0,0,0.5);
   --transition:   160ms cubic-bezier(.4,0,.2,1);
+
+  /* Safe-area insets (MixologyVault pattern):
+     Without viewport-fit:cover the viewport ends above the home indicator,
+     so --safe-b is 0 in browser. In standalone PWA mode it may be non-zero;
+     the fallback of 0px means no gap on plain web. --safe-t handles the
+     status-bar / Dynamic Island height in standalone mode. */
+  --safe-t: env(safe-area-inset-top,    0px);
+  --safe-b: env(safe-area-inset-bottom, 0px);
 }
 
 /* ─── Reset ──────────────────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-html { -webkit-text-size-adjust: 100%; }
+html, body {
+  height: 100%;
+  overflow: hidden;
+  -webkit-text-size-adjust: 100%;
+}
 
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
@@ -50,7 +62,7 @@ svg { display: block; }
 #app {
   display: flex;
   flex-direction: column;
-  height: 100dvh;
+  height: 100%;
   max-width: 480px;
   margin: 0 auto;
   position: relative;
@@ -60,20 +72,22 @@ svg { display: block; }
 /* ─── Header ─────────────────────────────────────────────────────────────── */
 .app-header {
   flex-shrink: 0;
-  height: var(--header-h);
+  padding: var(--safe-t) 20px 0;
+  min-height: calc(var(--header-h) + var(--safe-t));
   background: var(--bg);
   border-bottom: 1px solid var(--border-soft);
   display: flex;
-  align-items: center;
-  padding: 0 20px;
+  align-items: flex-end;
   position: relative;
   z-index: 10;
 }
 
 .logo {
+  height: var(--header-h);          /* fixed content height below status bar */
   display: flex;
   align-items: center;
   gap: 8px;
+  padding-bottom: 2px;
 }
 
 .logo-icon {
@@ -98,7 +112,7 @@ svg { display: block; }
   overflow-y: auto;
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
-  padding-bottom: calc(var(--nav-h) + env(safe-area-inset-bottom) + 16px);
+  padding-bottom: calc(var(--nav-h) + var(--safe-b) + 16px);
   scroll-behavior: smooth;
 }
 
@@ -634,15 +648,12 @@ h3.section-title { font-size: 13px; }
 /* ─── Bottom Navigation ──────────────────────────────────────────────────── */
 .bottom-nav {
   flex-shrink: 0;
-  height: calc(var(--nav-h) + env(safe-area-inset-bottom));
+  height: var(--nav-h);
   background: var(--surface);
   border-top: 1px solid var(--border-soft);
   display: flex;
   align-items: flex-start;
   padding-top: 8px;
-  padding-bottom: env(safe-area-inset-bottom);
-  padding-left: env(safe-area-inset-left);
-  padding-right: env(safe-area-inset-right);
   position: relative;
   z-index: 20;
 }
@@ -687,7 +698,7 @@ h3.section-title { font-size: 13px; }
 /* ─── FAB ────────────────────────────────────────────────────────────────── */
 .fab-container {
   position: absolute;
-  bottom: calc(var(--nav-h) + env(safe-area-inset-bottom) - 24px);
+  bottom: calc(var(--nav-h) - 24px);
   left: 50%;
   transform: translateX(-50%);
   z-index: 30;
@@ -801,10 +812,10 @@ h3.section-title { font-size: 13px; }
   background: var(--surface);
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
   border-top: 1px solid var(--border);
-  padding-bottom: calc(20px + env(safe-area-inset-bottom));
+  padding-bottom: calc(20px + var(--safe-b));
   transform: translateY(100%);
   transition: transform 300ms cubic-bezier(.32,0,.67,0);
-  max-height: 92dvh;
+  max-height: 90vh;
   overflow-y: auto;
 }
 
@@ -938,7 +949,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 /* ─── Toast ──────────────────────────────────────────────────────────────── */
 .toast {
   position: fixed;
-  top: calc(var(--header-h) + 12px);
+  top: calc(var(--header-h) + var(--safe-t) + 12px);
   left: 50%;
   transform: translateX(-50%) translateY(-8px);
   background: var(--card);
@@ -1016,6 +1027,33 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     border-left:  1px solid var(--border-soft);
     border-right: 1px solid var(--border-soft);
     box-shadow: 0 0 60px rgba(0,0,0,0.8);
+  }
+}
+
+/* ─── Desktop Floating Card ──────────────────────────────────────────────── */
+@media (min-width: 900px) {
+  body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #050505;
+  }
+
+  #app {
+    height: min(900px, 96vh);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border-soft);
+    box-shadow: 0 8px 80px rgba(0,0,0,0.9);
+    overflow: hidden;
+  }
+
+  .app-header {
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  }
+
+  .modal {
+    border-radius: var(--radius-lg);
+    margin-bottom: 0;
   }
 }
 
