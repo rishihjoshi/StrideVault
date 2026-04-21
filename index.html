@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#0B0B0B">
+  <meta name="description" content="Personal fitness tracker for treadmill workouts and weight tracking">
+
+  <!-- PWA / iOS -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="StrideVault">
+  <link rel="apple-touch-icon" href="./icons/icon.svg">
+
+  <title>StrideVault</title>
+  <link rel="manifest" href="./manifest.json">
+  <link rel="icon" type="image/svg+xml" href="./icons/icon.svg">
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+
+<!-- ── Loading ──────────────────────────────────────────────────────────── -->
+<div id="loading-overlay">
+  <div class="loader-icon">🏃</div>
+  <p class="loader-text">Loading StrideVault…</p>
+</div>
+
+<!-- ── App Shell ─────────────────────────────────────────────────────────── -->
+<div id="app">
+
+  <!-- Header -->
+  <header class="app-header">
+    <div class="logo">
+      <svg class="logo-icon" viewBox="0 0 30 30" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect width="30" height="30" rx="8" fill="#A3E635"/>
+        <circle cx="19" cy="8" r="3" fill="#0B0B0B"/>
+        <line x1="19" y1="11" x2="17" y2="19" stroke="#0B0B0B" stroke-width="2.2" stroke-linecap="round"/>
+        <line x1="18" y1="14" x2="13" y2="12" stroke="#0B0B0B" stroke-width="2" stroke-linecap="round"/>
+        <line x1="17.5" y1="15" x2="22" y2="13.5" stroke="#0B0B0B" stroke-width="2" stroke-linecap="round"/>
+        <line x1="17" y1="19" x2="14" y2="23" stroke="#0B0B0B" stroke-width="2.2" stroke-linecap="round"/>
+        <line x1="14" y1="23" x2="10.5" y2="22" stroke="#0B0B0B" stroke-width="2" stroke-linecap="round"/>
+        <line x1="17" y1="19" x2="20" y2="22.5" stroke="#0B0B0B" stroke-width="2.2" stroke-linecap="round"/>
+        <line x1="20" y1="22.5" x2="23" y2="21.5" stroke="#0B0B0B" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+      <span class="logo-text">Stride<span>Vault</span></span>
+    </div>
+  </header>
+
+  <!-- Main -->
+  <main class="main-content">
+
+    <!-- ══════════════════════════════════════════ DASHBOARD ══ -->
+    <div id="tab-dashboard" class="tab-content active">
+
+      <!-- Greeting + Streak -->
+      <div class="greeting-row">
+        <div>
+          <p class="greeting-text" id="greeting">Good morning</p>
+          <p class="greeting-name">Let's crush it 💪</p>
+        </div>
+        <div class="streak-pill">
+          <span class="streak-num" id="streak-count">0</span>
+          <span class="streak-lbl" id="streak-label">day streak</span>
+        </div>
+      </div>
+
+      <!-- Install Banner (hidden until PWA prompt fires) -->
+      <div id="install-banner" class="install-banner hidden">
+        <div class="install-text"><strong>Add to Home Screen</strong><br>Get the full app experience</div>
+        <button id="btn-install" class="install-btn">Install</button>
+      </div>
+
+      <!-- Stats Grid -->
+      <div class="stats-grid">
+        <div class="stat-card accent">
+          <div class="stat-val" id="stat-distance">0.00</div>
+          <div class="stat-lbl">km Today</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-val" id="stat-time">0</div>
+          <div class="stat-lbl">Minutes</div>
+        </div>
+        <div class="stat-card blue-card">
+          <div class="stat-val" id="stat-weight">—</div>
+          <div class="stat-sub" id="weight-delta"></div>
+          <div class="stat-lbl">Weight</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-val" id="stat-workouts">0</div>
+          <div class="stat-lbl">Workouts Today</div>
+        </div>
+      </div>
+
+      <!-- Daily Goals -->
+      <div class="section">
+        <div class="section-header">
+          <p class="section-title">Daily Goals</p>
+          <button class="btn-link" onclick="openGoalsModal()">Edit</button>
+        </div>
+        <div class="goals-card">
+          <div class="goal-row">
+            <div class="goal-meta">
+              <span class="goal-name">🏃 Distance</span>
+              <span class="goal-val" id="goal-distance-text">0 / 5 km</span>
+            </div>
+            <div class="progress-track">
+              <div class="progress-fill green" id="progress-distance" style="width:0%"></div>
+            </div>
+          </div>
+          <div class="goal-row">
+            <div class="goal-meta">
+              <span class="goal-name">⏱ Time</span>
+              <span class="goal-val" id="goal-time-text">0 / 45 min</span>
+            </div>
+            <div class="progress-track">
+              <div class="progress-fill blue" id="progress-time" style="width:0%"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Recent Activity -->
+      <div class="section">
+        <div class="section-header">
+          <p class="section-title">Recent Activity</p>
+          <button class="btn-link" onclick="navigateTo('history')">See all</button>
+        </div>
+        <div class="recent-card" id="recent-workouts">
+          <p class="empty-state">No workouts yet — tap <strong>+</strong> to add one!</p>
+        </div>
+      </div>
+
+    </div><!-- /dashboard -->
+
+
+    <!-- ══════════════════════════════════════════ HISTORY ════ -->
+    <div id="tab-history" class="tab-content">
+
+      <div class="section">
+        <p class="page-title">History</p>
+      </div>
+
+      <!-- Sub-tabs -->
+      <div class="htabs">
+        <button class="htab-btn active" data-htab="workouts">Workouts</button>
+        <button class="htab-btn" data-htab="weight">Weight</button>
+      </div>
+
+      <!-- Workouts panel -->
+      <div class="htab-panel active" data-hpanel="workouts">
+        <div class="history-list" id="workout-history">
+          <p class="empty-state">No workouts logged yet.</p>
+        </div>
+      </div>
+
+      <!-- Weight panel -->
+      <div class="htab-panel" data-hpanel="weight">
+        <div class="history-list" id="weight-history">
+          <p class="empty-state">No weight logs yet.</p>
+        </div>
+      </div>
+
+    </div><!-- /history -->
+
+
+    <!-- ══════════════════════════════════════════ CHARTS ═════ -->
+    <div id="tab-charts" class="tab-content">
+
+      <div class="section">
+        <p class="page-title">Progress</p>
+      </div>
+
+      <div class="section mt-12">
+        <p class="section-title">Distance Over Time</p>
+        <div class="chart-wrap">
+          <canvas id="chart-distance"></canvas>
+          <div id="chart-distance-empty" class="chart-empty">Log workouts to see your distance trend</div>
+        </div>
+      </div>
+
+      <div class="section mt-12">
+        <p class="section-title">Weight Trend</p>
+        <div class="chart-wrap">
+          <canvas id="chart-weight"></canvas>
+          <div id="chart-weight-empty" class="chart-empty">Log weight to see your trend</div>
+        </div>
+      </div>
+
+      <div class="section mt-12">
+        <p class="section-title">Weekly Summary</p>
+        <div class="chart-wrap" style="height:260px">
+          <canvas id="chart-weekly"></canvas>
+          <div id="chart-weekly-empty" class="chart-empty">No data yet</div>
+        </div>
+      </div>
+
+    </div><!-- /charts -->
+
+
+    <!-- ══════════════════════════════════════════ SETTINGS ═══ -->
+    <div id="tab-settings" class="tab-content">
+
+      <div class="section">
+        <p class="page-title">Settings</p>
+      </div>
+
+      <!-- Goals -->
+      <div class="section mt-12">
+        <p class="section-title">Daily Goals</p>
+        <div class="settings-list">
+          <button class="settings-row" onclick="openGoalsModal()">
+            <span class="settings-label">Distance goal</span>
+            <span class="settings-value"><span id="settings-dist">5</span> km <span style="color:var(--text-4)">›</span></span>
+          </button>
+          <button class="settings-row" onclick="openGoalsModal()">
+            <span class="settings-label">Time goal</span>
+            <span class="settings-value"><span id="settings-time">45</span> min <span style="color:var(--text-4)">›</span></span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Stats summary -->
+      <div class="section mt-12">
+        <p class="section-title">Your Stats</p>
+        <div class="settings-list">
+          <div class="settings-row" style="cursor:default">
+            <span class="settings-label">Total workouts</span>
+            <span class="settings-badge" id="settings-workout-count">0</span>
+          </div>
+          <div class="settings-row" style="cursor:default">
+            <span class="settings-label">Weight logs</span>
+            <span class="settings-badge" id="settings-weight-count">0</span>
+          </div>
+          <div class="settings-row" style="cursor:default">
+            <span class="settings-label">Tracking since</span>
+            <span class="settings-value" id="settings-since">—</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Data -->
+      <div class="section mt-12">
+        <p class="section-title">Data Management</p>
+        <div class="settings-list">
+          <button class="settings-row" id="btn-export">
+            <span class="settings-label">Export backup</span>
+            <span class="settings-arrow">↓ JSON</span>
+          </button>
+          <button class="settings-row" id="btn-import">
+            <span class="settings-label">Import backup</span>
+            <span class="settings-arrow">↑ JSON</span>
+          </button>
+        </div>
+        <input type="file" id="import-file" accept=".json" style="display:none">
+      </div>
+
+      <!-- About -->
+      <div class="section mt-12">
+        <p class="section-title">About</p>
+        <div class="settings-list">
+          <div class="settings-row" style="cursor:default">
+            <span class="settings-label">App</span>
+            <span class="settings-value">StrideVault</span>
+          </div>
+          <div class="settings-row" style="cursor:default">
+            <span class="settings-label">Version</span>
+            <span class="settings-value">1.0.0</span>
+          </div>
+          <div class="settings-row" style="cursor:default">
+            <span class="settings-label">Storage</span>
+            <span class="settings-value">IndexedDB (local)</span>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /settings -->
+
+  </main><!-- /main-content -->
+
+  <!-- Bottom Nav -->
+  <nav class="bottom-nav">
+    <button class="nav-item active" data-tab="dashboard">
+      <span class="nav-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/>
+          <rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/>
+        </svg>
+      </span>
+      <span class="nav-label">Dashboard</span>
+    </button>
+    <button class="nav-item" data-tab="history">
+      <span class="nav-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/>
+          <rect x="9" y="3" width="6" height="4" rx="1"/><line x1="9" y1="12" x2="15" y2="12"/>
+          <line x1="9" y1="16" x2="13" y2="16"/>
+        </svg>
+      </span>
+      <span class="nav-label">History</span>
+    </button>
+    <div class="nav-spacer"></div>
+    <button class="nav-item" data-tab="charts">
+      <span class="nav-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+        </svg>
+      </span>
+      <span class="nav-label">Charts</span>
+    </button>
+    <button class="nav-item" data-tab="settings">
+      <span class="nav-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/>
+        </svg>
+      </span>
+      <span class="nav-label">Settings</span>
+    </button>
+  </nav>
+
+  <!-- FAB -->
+  <div class="fab-container">
+    <div id="fab-menu" class="fab-menu">
+      <button id="fab-weight" class="fab-option">
+        <span class="fab-opt-icon">⚖️</span>
+        Log Weight
+      </button>
+      <button id="fab-workout" class="fab-option">
+        <span class="fab-opt-icon">🏃</span>
+        Log Workout
+      </button>
+    </div>
+    <button id="fab" class="fab" aria-label="Add entry">+</button>
+  </div>
+
+</div><!-- /app -->
+
+
+<!-- ── Workout Modal ──────────────────────────────────────────────────────── -->
+<div id="workout-modal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="workout-modal-title">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-header">
+      <h2 class="modal-title" id="workout-modal-title">Log Workout</h2>
+      <button class="modal-close" aria-label="Close">✕</button>
+    </div>
+    <form id="workout-form" class="modal-body" novalidate>
+      <div class="form-group">
+        <label for="wf-date">Date</label>
+        <input id="wf-date" type="date" name="date" required>
+      </div>
+      <div class="form-group">
+        <label for="wf-type">Type</label>
+        <select id="wf-type" name="type" required>
+          <option value="walking">🚶 Walking</option>
+          <option value="running">🏃 Running</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="wf-dist">Distance (km)</label>
+          <input id="wf-dist" type="number" name="distance" step="0.01" min="0.01" max="500" required placeholder="0.00">
+        </div>
+        <div class="form-group">
+          <label for="wf-time">Time (min)</label>
+          <input id="wf-time" type="number" name="time" step="1" min="1" max="999" required placeholder="30">
+        </div>
+      </div>
+      <div class="speed-hint" id="speed-preview"></div>
+      <div class="form-group">
+        <label for="wf-incline">Incline % <span class="opt">(optional)</span></label>
+        <input id="wf-incline" type="number" name="incline" step="0.5" min="0" max="30" placeholder="0">
+      </div>
+      <div class="form-group">
+        <label for="wf-notes">Notes <span class="opt">(optional)</span></label>
+        <textarea id="wf-notes" name="notes" rows="2" placeholder="How did it feel?"></textarea>
+      </div>
+      <button type="submit" class="btn-primary">Save Workout</button>
+    </form>
+  </div>
+</div>
+
+
+<!-- ── Weight Modal ───────────────────────────────────────────────────────── -->
+<div id="weight-modal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="weight-modal-title">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-header">
+      <h2 class="modal-title" id="weight-modal-title">Log Weight</h2>
+      <button class="modal-close" aria-label="Close">✕</button>
+    </div>
+    <form id="weight-form" class="modal-body" novalidate>
+      <div class="form-group">
+        <label for="wt-date">Date</label>
+        <input id="wt-date" type="date" name="date" required>
+      </div>
+      <div class="form-group">
+        <label for="wt-kg">Weight (kg)</label>
+        <input id="wt-kg" type="number" name="weightKg" step="0.1" min="20" max="300" required placeholder="70.0">
+      </div>
+      <button type="submit" class="btn-primary">Save Weight</button>
+    </form>
+  </div>
+</div>
+
+
+<!-- ── Goals Modal ────────────────────────────────────────────────────────── -->
+<div id="goals-modal" class="modal-backdrop" role="dialog" aria-modal="true">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-header">
+      <h2 class="modal-title">Daily Goals</h2>
+      <button class="modal-close" aria-label="Close">✕</button>
+    </div>
+    <form id="goals-form" class="modal-body" novalidate>
+      <div class="form-group">
+        <label for="gf-dist">Distance goal (km)</label>
+        <input id="gf-dist" type="number" name="dailyDistance" step="0.5" min="0" required placeholder="5">
+      </div>
+      <div class="form-group">
+        <label for="gf-time">Time goal (minutes)</label>
+        <input id="gf-time" type="number" name="dailyTime" step="5" min="0" required placeholder="45">
+      </div>
+      <button type="submit" class="btn-primary">Save Goals</button>
+    </form>
+  </div>
+</div>
+
+
+<!-- ── Toast ──────────────────────────────────────────────────────────────── -->
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+
+<!-- ── Scripts ────────────────────────────────────────────────────────────── -->
+<script src="https://cdn.jsdelivr.net/npm/dexie@3.2.4/dist/dexie.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="./db.js"></script>
+<script src="./app.js"></script>
+
+</body>
+</html>
