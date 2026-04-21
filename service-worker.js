@@ -1,4 +1,4 @@
-const CACHE_NAME = 'stridevault-v1';
+const CACHE_NAME = 'stridevault-v2';
 const STATIC_ASSETS = [
   './index.html',
   './style.css',
@@ -8,6 +8,7 @@ const STATIC_ASSETS = [
   './icons/icon.svg',
   './icons/icon-192.svg',
   './icons/icon-512.svg',
+  './icons/icon-maskable.svg',
 ];
 const CDN_ASSETS = [
   'https://cdn.jsdelivr.net/npm/dexie@3.2.4/dist/dexie.min.js',

@@ -29,6 +29,10 @@
   <meta name="apple-mobile-web-app-title" content="StrideVault">
   <link rel="apple-touch-icon" href="./icons/icon.svg">
 
+  <!-- PWA / Android -->
+  <meta name="application-name" content="StrideVault">
+  <meta name="mobile-web-app-capable" content="yes">
+
   <title>StrideVault</title>
   <link rel="manifest" href="./manifest.json">
   <link rel="icon" type="image/svg+xml" href="./icons/icon.svg">
@@ -91,7 +95,7 @@
       <div class="stats-grid">
         <div class="stat-card accent">
           <div class="stat-val" id="stat-distance">0.00</div>
-          <div class="stat-lbl">km Today</div>
+          <div class="stat-lbl">mi Today</div>
         </div>
         <div class="stat-card">
           <div class="stat-val" id="stat-time">0</div>
@@ -112,13 +116,13 @@
       <div class="section">
         <div class="section-header">
           <p class="section-title">Daily Goals</p>
-          <button class="btn-link" onclick="openGoalsModal()">Edit</button>
+          <button class="btn-link" id="btn-edit-goals">Edit</button>
         </div>
         <div class="goals-card">
           <div class="goal-row">
             <div class="goal-meta">
               <span class="goal-name">🏃 Distance</span>
-              <span class="goal-val" id="goal-distance-text">0 / 5 km</span>
+              <span class="goal-val" id="goal-distance-text">0 / 3 mi</span>
             </div>
             <div class="progress-track">
               <div class="progress-fill green" id="progress-distance" style="width:0%"></div>
@@ -140,7 +144,7 @@
       <div class="section">
         <div class="section-header">
           <p class="section-title">Recent Activity</p>
-          <button class="btn-link" onclick="navigateTo('history')">See all</button>
+          <button class="btn-link" id="btn-see-all">See all</button>
         </div>
         <div class="recent-card" id="recent-workouts">
           <p class="empty-state">No workouts yet — tap <strong>+</strong> to add one!</p>
@@ -225,11 +229,11 @@
       <div class="section mt-12">
         <p class="section-title">Daily Goals</p>
         <div class="settings-list">
-          <button class="settings-row" onclick="openGoalsModal()">
+          <button class="settings-row" data-action="open-goals">
             <span class="settings-label">Distance goal</span>
-            <span class="settings-value"><span id="settings-dist">5</span> km <span style="color:var(--text-4)">›</span></span>
+            <span class="settings-value"><span id="settings-dist">3</span> mi <span style="color:var(--text-4)">›</span></span>
           </button>
-          <button class="settings-row" onclick="openGoalsModal()">
+          <button class="settings-row" data-action="open-goals">
             <span class="settings-label">Time goal</span>
             <span class="settings-value"><span id="settings-time">45</span> min <span style="color:var(--text-4)">›</span></span>
           </button>
@@ -375,8 +379,8 @@
       </div>
       <div class="form-row">
         <div class="form-group">
-          <label for="wf-dist">Distance (km)</label>
-          <input id="wf-dist" type="number" name="distance" step="0.01" min="0.01" max="500" required placeholder="0.00">
+          <label for="wf-dist">Distance (mi)</label>
+          <input id="wf-dist" type="number" name="distance" step="0.01" min="0.01" max="200" required placeholder="0.00">
         </div>
         <div class="form-group">
           <label for="wf-time">Time (min)</label>
@@ -431,8 +435,8 @@
     </div>
     <form id="goals-form" class="modal-body" novalidate>
       <div class="form-group">
-        <label for="gf-dist">Distance goal (km)</label>
-        <input id="gf-dist" type="number" name="dailyDistance" step="0.5" min="0" required placeholder="5">
+        <label for="gf-dist">Distance goal (mi)</label>
+        <input id="gf-dist" type="number" name="dailyDistance" step="0.1" min="0" required placeholder="3">
       </div>
       <div class="form-group">
         <label for="gf-time">Time goal (minutes)</label>

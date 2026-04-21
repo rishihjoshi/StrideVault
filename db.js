@@ -15,7 +15,7 @@ async function initDB() {
 
     const existing = await db.goals.get('daily');
     if (!existing) {
-      await db.goals.put({ id: 'daily', dailyDistance: 5, dailyTime: 45 });
+      await db.goals.put({ id: 'daily', dailyDistance: 3, dailyTime: 45 });
     }
     return true;
   } catch (err) {
@@ -30,7 +30,7 @@ function _lsInit() {
   if (!localStorage.getItem('sv_workouts'))   localStorage.setItem('sv_workouts', '[]');
   if (!localStorage.getItem('sv_weightLogs')) localStorage.setItem('sv_weightLogs', '[]');
   if (!localStorage.getItem('sv_goals'))
-    localStorage.setItem('sv_goals', JSON.stringify({ id: 'daily', dailyDistance: 5, dailyTime: 45 }));
+    localStorage.setItem('sv_goals', JSON.stringify({ id: 'daily', dailyDistance: 3, dailyTime: 45 }));
 }
 
 function _lsGet(key)       { try { return JSON.parse(localStorage.getItem(key) || '[]'); } catch { return []; } }
@@ -120,8 +120,8 @@ async function deleteWeightLog(id) {
 
 async function getGoals() {
   if (useLocalStorage)
-    return _lsGetObj('sv_goals') || { id: 'daily', dailyDistance: 5, dailyTime: 45 };
-  return (await db.goals.get('daily')) || { id: 'daily', dailyDistance: 5, dailyTime: 45 };
+    return _lsGetObj('sv_goals') || { id: 'daily', dailyDistance: 3, dailyTime: 45 };
+  return (await db.goals.get('daily')) || { id: 'daily', dailyDistance: 3, dailyTime: 45 };
 }
 
 async function updateGoals(goals) {

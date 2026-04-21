@@ -7,7 +7,7 @@ const state = {
   currentTab: 'dashboard',
   workouts:   [],
   weightLogs: [],
-  goals:      { id: 'daily', dailyDistance: 5, dailyTime: 45 },
+  goals:      { id: 'daily', dailyDistance: 3, dailyTime: 45 },
   editingWorkout: null,
   editingWeight:  null,
   charts: {},
@@ -28,9 +28,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupExportImport();
   setupHistoryTabs();
   setupHistoryDelegation(); // SEC: event delegation replaces inline onclick
+  setupStaticHandlers();    // SEC: replaces remaining inline onclick attributes
 
   renderDashboard();
   showLoading(false);
+
+  // Handle Android PWA shortcut URL fragments (#workout, #weight)
+  const fragment = window.location.hash;
+  if (fragment === '#workout') { openWorkoutModal(); window.history.replaceState(null, '', './index.html'); }
+  if (fragment === '#weight')  { openWeightModal();  window.history.replaceState(null, '', './index.html'); }
 
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('./service-worker.js')
@@ -115,6 +121,18 @@ function setupFAB() {
 function closeFAB() {
   document.getElementById('fab-menu').classList.remove('open');
   document.getElementById('fab').classList.remove('open');
+}
+
+// SEC: replaces all inline onclick="..." in index.html — no global function exposure needed
+function setupStaticHandlers() {
+  // Dashboard: Edit goals + See all
+  document.getElementById('btn-edit-goals')?.addEventListener('click', openGoalsModal);
+  document.getElementById('btn-see-all')?.addEventListener('click', () => navigateTo('history'));
+
+  // Settings: rows that open goals modal (event delegation)
+  document.getElementById('tab-settings')?.addEventListener('click', (e) => {
+    if (e.target.closest('[data-action="open-goals"]')) openGoalsModal();
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -209,7 +227,7 @@ function updateSpeedPreview() {
   const el   = document.getElementById('speed-preview');
   // SEC: use .textContent, never innerHTML; guard division-by-zero
   el.textContent = (isFinite(d) && d > 0 && isFinite(t) && t > 0)
-    ? `Auto speed: ${calcSpeed(d, t)} km/h`
+    ? `Auto speed: ${calcSpeed(d, t)} mph`
     : '';
 }
 
@@ -312,6 +330,7 @@ function renderDashboard() {
   setText('stat-weight', latestWeight ? `${Number(latestWeight.weightKg).toFixed(1)} kg` : '—');
   setText('stat-workouts', todayW.length);
 
+
   const goalDist = Number(state.goals.dailyDistance) || 1;
   const goalTime = Number(state.goals.dailyTime) || 1;
   const distPct  = Math.min((todayDist / goalDist) * 100, 100);
@@ -319,7 +338,7 @@ function renderDashboard() {
 
   setStyle('progress-distance', 'width', `${distPct}%`);
   setStyle('progress-time',     'width', `${timePct}%`);
-  setText('goal-distance-text', `${todayDist.toFixed(1)} / ${goalDist} km`);
+  setText('goal-distance-text', `${todayDist.toFixed(2)} / ${goalDist} mi`);
   setText('goal-time-text',     `${todayTime} / ${goalTime} min`);
 
   const wDelta = document.getElementById('weight-delta');
@@ -363,7 +382,7 @@ function renderRecentWorkouts() {
       <div class="workout-row">
         <span class="badge ${safeType}">${escHtml(safeType)}</span>
         <span class="workout-row-date">${escHtml(fmtDate(sanitizeDateStr(w.date)))}</span>
-        <span class="workout-row-stats">${dist} km · ${time} min · ${speed} km/h</span>
+        <span class="workout-row-stats">${dist} mi · ${time} min · ${speed} mph</span>
       </div>`;
   }).join('');
 }
@@ -451,11 +470,11 @@ function renderWorkoutHistory() {
             <span class="hi-date">${dateStr}</span>
           </div>
           <div class="hi-stats">
-            <span>${dist} km</span>
+            <span>${dist} mi</span>
             <span class="hi-sep">·</span>
             <span>${time} min</span>
             <span class="hi-sep">·</span>
-            <span>${speed} km/h</span>
+            <span>${speed} mph</span>
             ${incl !== null ? `<span class="hi-sep">·</span><span>${incl}% incline</span>` : ''}
           </div>
           ${notes ? `<p class="hi-notes">${notes}</p>` : ''}
@@ -660,7 +679,7 @@ function renderWeeklyChart() {
       labels:   weeks.map(w => w.label),
       datasets: [
         {
-          label:           'Distance (km)',
+          label:           'Distance (mi)',
           data:            weeks.map(w => w.distance),
           backgroundColor: 'rgba(163,230,53,0.7)',
           borderColor:     '#A3E635',
@@ -818,13 +837,14 @@ function validateAndSanitizeImport(data) {
   const workouts = data.workouts
     .filter(w => w && typeof w === 'object' && !Array.isArray(w))
     .map(w => {
-      const id       = String(w.id ?? '').slice(0, 64).replace(/[^\w\-]/g, '');
+      const rawId    = String(w.id ?? '').slice(0, 64).replace(/[^\w\-]/g, '');
+      const id       = rawId || (Date.now().toString(36) + Math.random().toString(36).slice(2));
       const date     = sanitizeDateStr(String(w.date ?? ''));
       const type     = ALLOWED_TYPES.includes(w.type) ? w.type : 'walking';
-      const distance = clampNum(w.distance, 0.01, 9999, 2);
+      const distance = clampNum(w.distance, 0.01, 500, 2);
       const time     = clampNum(w.time,     0.1,  9999, 1);
       const speed    = isFinite(Number(w.speed)) ? clampNum(w.speed, 0, 999, 2) : calcSpeed(distance, time);
-      const entry    = { id: id || undefined, date, type, distance, time, speed };
+      const entry    = { id, date, type, distance, time, speed };
 
       if (w.incline != null) {
         const inc = clampNum(w.incline, 0, 30, 1);
@@ -840,14 +860,15 @@ function validateAndSanitizeImport(data) {
   const weightLogs = data.weightLogs
     .filter(l => l && typeof l === 'object' && !Array.isArray(l))
     .map(l => {
-      const id  = String(l.id ?? '').slice(0, 64).replace(/[^\w\-]/g, '');
-      const date = sanitizeDateStr(String(l.date ?? ''));
-      const kg   = clampNum(l.weightKg, 1, 999, 1);
-      return { id: id || undefined, date, weightKg: kg };
+      const rawId = String(l.id ?? '').slice(0, 64).replace(/[^\w\-]/g, '');
+      const id    = rawId || (Date.now().toString(36) + Math.random().toString(36).slice(2));
+      const date  = sanitizeDateStr(String(l.date ?? ''));
+      const kg    = clampNum(l.weightKg, 1, 999, 1);
+      return { id, date, weightKg: kg };
     })
     .filter(l => l.date && l.weightKg > 0);
 
-  let goals = { id: 'daily', dailyDistance: 5, dailyTime: 45 };
+  let goals = { id: 'daily', dailyDistance: 3, dailyTime: 45 };
   if (data.goals && typeof data.goals === 'object' && !Array.isArray(data.goals)) {
     goals = {
       id:            'daily',
@@ -910,8 +931,9 @@ function toFinite(val) {
   return isFinite(n) ? n : '';
 }
 
-// Speed: km/h, guards division-by-zero
-function calcSpeed(distKm, timeMin) {
+// Speed: mph (distance in miles / time in minutes → miles per hour), guards division-by-zero
+function calcSpeed(distMi, timeMin) {
+  const distKm = distMi; // stored value is in miles; variable name kept for formula clarity
   if (!isFinite(distKm) || !isFinite(timeMin) || timeMin <= 0) return 0;
   return parseFloat(((distKm / timeMin) * 60).toFixed(2));
 }
